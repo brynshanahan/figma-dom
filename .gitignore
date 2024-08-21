@@ -5,12 +5,7 @@ node_modules/
 dist/
 build/
 
-# Dependency lock files
-package-lock.json
-yarn.lock
-
 # IDE and editor files
-.vscode/
 .idea/
 *.sublime-project
 *.sublime-workspace
@@ -23,3 +18,4 @@ yarn.lock
 # OS generated files
 .DS_Store
 Thumbs.db
+.env

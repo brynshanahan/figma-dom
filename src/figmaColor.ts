@@ -11,8 +11,15 @@ import {
   isPaintGradient,
   isPaintImage,
   isPaintSolid,
-} from './figmaSchema'
-import { FigmaVariableAlias, FigmaColorVariable } from './figmaVariables'
+  GetApiPaintType,
+  ApiPaintSolid,
+  ApiColorStop,
+} from './figmaApiSchema'
+import {
+  FigmaVariableAlias,
+  FigmaColorVariable,
+  FigmaVariableLibrary,
+} from './figmaVariables'
 
 export class FigmaColor {
   r: number
@@ -36,7 +43,7 @@ export class FigmaColorStop {
   position: number
   color: FigmaColor
 
-  constructor(stop: { position: number; color: ApiColor }) {
+  constructor(stop: ApiColorStop) {
     this.position = stop.position
     this.color = new FigmaColor(stop.color)
   }
@@ -44,13 +51,22 @@ export class FigmaColorStop {
 export class FigmaPaintSolid {
   type: 'SOLID' = 'SOLID'
   color: FigmaColor
+  opacity?: number
+  visible?: boolean
 
   boundVariables?: {
     color: FigmaVariableAlias<FigmaColorVariable>
   }
 
-  constructor(paint: { color: ApiColor }) {
+  constructor(paint: ApiPaintSolid, library: FigmaVariableLibrary) {
     this.color = new FigmaColor(paint.color)
+    this.boundVariables = paint.boundVariables
+      ? {
+          color: new FigmaVariableAlias(paint.boundVariables.color, library),
+        }
+      : undefined
+    this.opacity = paint.opacity
+    this.visible = paint.visible
   }
 }
 
@@ -100,6 +116,9 @@ export class FigmaPaintImage {
   /** A reference to the GIF embedded in this node, if the image is a GIF. To download the image using this reference, use the GET file images endpoint to retrieve the mapping from image references to image URLs */
   gifRef: string
 
+  opacity?: number
+  visible?: boolean
+
   constructor(paint: ApiPaintImage) {
     this.type = paint.type
     this.scaleMode = paint.scaleMode
@@ -108,19 +127,24 @@ export class FigmaPaintImage {
     this.scalingFactor = paint.scalingFactor
     this.rotation = paint.rotation
     this.gifRef = paint.gifRef
+    this.opacity = paint.opacity
+    this.visible = paint.visible
   }
 }
 
 export type FigmaPaint = FigmaPaintSolid | FigmaPaintGradient | FigmaPaintImage
 
-export function createFigmaPaint(apiPaint: ApiPaint) {
+export function createFigmaPaint(
+  apiPaint: ApiPaint,
+  library: FigmaVariableLibrary
+) {
   switch (true) {
     case isPaintGradient(apiPaint):
       return new FigmaPaintGradient(apiPaint)
     case isPaintImage(apiPaint):
       return new FigmaPaintImage(apiPaint)
     case isPaintSolid(apiPaint):
-      return new FigmaPaintSolid(apiPaint)
+      return new FigmaPaintSolid(apiPaint, library)
     default:
       throw new Error('Unknown paint type')
   }

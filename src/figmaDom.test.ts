@@ -1,10 +1,11 @@
-import { describe, it, expect } from 'vitest'
-import { FigmaNode, FigmaDocument } from './figmaDom'
-import { ApiNode, ApiNodeType } from './figmaSchema'
+import { describe, it, expect, test } from 'vitest'
+import { FigmaDocument } from './figmaDom'
+import { FigmaNode } from './figmaNode'
+import { ApiNode, ApiNodeType } from './figmaApiSchema'
 import { FigmaVariableLibrary } from './figmaVariables'
 
 describe('Figma DOM', () => {
-  it('should have a child node', () => {
+  test('should have a child node', () => {
     const figmaNode = new FigmaNode({
       id: '1',
       name: '',
@@ -61,7 +62,7 @@ describe('Figma DOM', () => {
     expect(siblingNode.parentNode).toBe(null)
   })
 
-  it('should query selector', () => {
+  test('should query selector', () => {
     const figmaNode = new FigmaNode({
       id: '1',
       name: '',
@@ -70,7 +71,10 @@ describe('Figma DOM', () => {
       visible: true,
       isFixed: true,
     })
-    const figmaLibrary = new FigmaVariableLibrary('', '', '')
+    const figmaLibrary = new FigmaVariableLibrary({
+      variables: {},
+      variableCollections: {},
+    })
 
     const childNode = new FigmaDocument(
       {
@@ -89,7 +93,7 @@ describe('Figma DOM', () => {
       {
         children: [],
         id: '3',
-        name: 'foo',
+        name: 'bar',
         pluginData: {},
         sharedPluginData: {},
         type: ApiNodeType.DOCUMENT,
@@ -108,7 +112,7 @@ describe('Figma DOM', () => {
     })
 
     figmaNode.appendChild(childNode)
-    figmaNode.appendChild(additionalNode)
+    childNode.appendChild(additionalNode)
     figmaNode.appendChild(siblingNode)
 
     debugger
@@ -139,5 +143,22 @@ describe('Figma DOM', () => {
     siblingNode.remove()
 
     expect(figmaNode.querySelectorAll({ nodeType: FigmaNode }).length).toBe(2)
+  })
+
+  test('works with the api', async () => {
+    const doc = await FigmaDocument.fromApi({
+      key: import.meta.env.VITEST_FIGMA_FILE_KEY,
+      apiKey: import.meta.env.VITEST_FIGMA_API_KEY,
+    })
+
+    expect(doc.name).toBe('Document')
+    expect(doc.children.length).toBeGreaterThan(0)
+  })
+
+  test('should render an svg', async () => {
+    const doc = await FigmaDocument.fromApi({
+      key: import.meta.env.VITEST_FIGMA_FILE_KEY,
+      apiKey: import.meta.env.VITEST_FIGMA_API_KEY,
+    })
   })
 })

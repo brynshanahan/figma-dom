@@ -10,7 +10,12 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@types/node": "^22.4.1",
+    "localforage": "^1.10.0",
+    "svgpath": "^2.6.0",
     "typescript": "^5.5.4",
-    "vitest": "^2.0.5"
+    "vite": "^5.4.2",
+    "vitest": "^2.0.5",
+    "zod": "^3.23.8"
   }
 }

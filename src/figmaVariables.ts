@@ -1,7 +1,7 @@
 import { FigmaColor } from './figmaColor'
 import {
   VariableCollection,
-  VariableLibrary,
+  ApiVariableLibrary,
   Variable,
   BooleanVariable,
   isVariableAlias,
@@ -9,57 +9,30 @@ import {
   FloatVariable,
   StringVariable,
   ApiVariableAlias,
-} from './figmaSchema'
+} from './figmaApiSchema'
+import { ApiOpts } from './ApiOpts'
 
 export class FigmaVariableLibrary {
   variables: { [variableId: string]: FigmaVariable } = {}
   variableCollections: { [collectionId: string]: VariableCollection } = {}
 
-  libraryResolver: () => Promise<VariableLibrary>
+  libraryResolver: () => Promise<void> = async () => {}
   resolved: boolean = false
   loading: boolean | Promise<any> = false
 
-  constructor(fileKey: string, branchKey: string | undefined, apiKey: string) {
-    this.libraryResolver = async () => {
-      let url = new URL(`https://api.figma.com/v1/files/${fileKey}`)
-
-      if (branchKey) {
-        url.searchParams.set('branch', branchKey)
-      }
-
-      const response = await fetch(url.href, {
-        headers: {
-          'X-Figma-Token': apiKey,
-        },
-      })
-
-      const data = await response.json()
-
-      return data as VariableLibrary
-    }
+  static isType(value: any): value is FigmaVariableLibrary {
+    return value instanceof FigmaVariableLibrary
   }
 
-  get<T extends FigmaVariable>(id: string) {
-    if (!this.resolved) {
-      throw new Error('Library not resolved')
-    }
-
-    return this.variables[id] as T
-  }
-
-  async resolve<T extends FigmaVariable>(
-    id: string,
-    resolveDeep: boolean = false
+  constructor(
+    opts:
+      | FigmaVariableLibrary
+      | ApiVariableLibrary
+      | { libraryResolver: () => Promise<ApiVariableLibrary> }
   ) {
-    if (this.resolved) {
-      return
-    }
+    const parseFromApiVariableLibrary = (library: ApiVariableLibrary) => {
+      this.resolved = true
 
-    this.resolved = true
-
-    let promise = this.libraryResolver()
-
-    this.loading = promise.then((library) => {
       this.variables = {}
       this.variableCollections = {}
 
@@ -92,13 +65,100 @@ export class FigmaVariableLibrary {
         const collection = library.variableCollections[collectionId]
         this.variableCollections[collection.id] = collection
       }
+    }
 
+    if (opts instanceof FigmaVariableLibrary) {
+      this.variables = opts.variables
+      this.variableCollections = opts.variableCollections
+      this.libraryResolver = opts.libraryResolver
+      this.resolved = opts.resolved
+      this.loading = opts.loading
+    } else if ('libraryResolver' in opts) {
+      this.libraryResolver = async () => {
+        let library = await opts.libraryResolver()
+
+        parseFromApiVariableLibrary(library)
+      }
+    } else {
+      parseFromApiVariableLibrary(opts)
+    }
+  }
+
+  static fromApi(opts: ApiOpts) {
+    const { key, apiKey } = opts
+
+    const library = new FigmaVariableLibrary({
+      async libraryResolver() {
+        const url = new URL(
+          `/v1/files/${key}/variables/local`,
+          `https://api.figma.com`
+        )
+
+        let cached = opts.cache && (await opts.cache.get(url.href))
+
+        if (cached) {
+          return cached.meta
+        }
+
+        const response = await fetch(url.href, {
+          headers: {
+            'X-Figma-Token': apiKey,
+          },
+        })
+
+        const data = (await response.json()) as {
+          error: boolean
+          status: number
+          meta: ApiVariableLibrary
+        }
+
+        if (opts.cache) {
+          opts.cache.set(url.href, data)
+        }
+
+        if (data.error) {
+          throw new Error('Error fetching variables')
+        }
+
+        return data.meta
+      },
+    })
+
+    return library
+  }
+
+  get<T extends FigmaVariable>(id: string) {
+    if (!this.resolved) {
+      throw new Error('Library not resolved')
+    }
+
+    return this.variables[id] as T
+  }
+
+  async resolveAll() {
+    if (this.resolved) {
+      return
+    }
+
+    if (this.loading) {
+      await this.loading
+    }
+
+    this.resolved = true
+
+    let promise = this.libraryResolver()
+
+    this.loading = promise.then(() => {
       this.loading = false
     })
 
     await this.loading
+  }
 
-    return this.variables[id] as T
+  async resolve<T extends FigmaVariable>(id: string) {
+    await this.resolveAll()
+
+    return this.get<T>(id)
   }
 }
 export class FigmaVariable implements Variable {
@@ -136,7 +196,7 @@ export class FigmaBooleanVariable
 
   scopes: BooleanVariable['scopes']
   valuesByMode: {
-    [modeId: string]: boolean | FigmaBooleanVariable
+    [modeId: string]: boolean | FigmaVariableAlias<FigmaBooleanVariable>
   }
   resolvedType: 'BOOLEAN' = 'BOOLEAN'
 
@@ -151,9 +211,7 @@ export class FigmaBooleanVariable
       if (typeof value === 'boolean') {
         this.valuesByMode[key] = value
       } else if (isVariableAlias(value)) {
-        this.valuesByMode[key] = this.library.get<FigmaBooleanVariable>(
-          value.id
-        )
+        this.valuesByMode[key] = new FigmaVariableAlias(value, library)
       }
     }
   }
@@ -166,8 +224,8 @@ export class FigmaBooleanVariable
 
   resolvedValue() {
     let value = this.value()
-    while (value instanceof FigmaBooleanVariable) {
-      value = value.value()
+    while (value instanceof FigmaVariableAlias) {
+      value = value.resolveSync().value()
     }
     return value
   }
@@ -181,13 +239,23 @@ export class FigmaColorVariable
 
   scopes: ColorVariable['scopes']
   valuesByMode: {
-    [key: string]: FigmaColor | FigmaColorVariable
+    [key: string]: FigmaColor | FigmaVariableAlias<FigmaColorVariable>
   }
 
   constructor(variable: ColorVariable, library: FigmaVariableLibrary) {
     super(variable, library)
     this.scopes = variable.scopes
     this.valuesByMode = {}
+
+    for (const key in variable.valuesByMode) {
+      const value = variable.valuesByMode[key]
+
+      if (value instanceof FigmaColor) {
+        this.valuesByMode[key] = value
+      } else if (isVariableAlias(value)) {
+        this.valuesByMode[key] = new FigmaVariableAlias(value, library)
+      }
+    }
   }
 
   value() {
@@ -198,8 +266,8 @@ export class FigmaColorVariable
 
   resolvedValue() {
     let value = this.value()
-    while (value instanceof FigmaColorVariable) {
-      value = value.value()
+    while (value instanceof FigmaVariableAlias) {
+      value = value.resolveSync().value()
     }
     return value
   }
@@ -213,7 +281,7 @@ export class FigmaFloatVariable
 
   scopes: FloatVariable['scopes']
   valuesByMode: {
-    [key: string]: number | FigmaFloatVariable
+    [key: string]: number | FigmaVariableAlias<FigmaFloatVariable>
   }
 
   constructor(variable: FloatVariable, library: FigmaVariableLibrary) {
@@ -227,7 +295,7 @@ export class FigmaFloatVariable
       if (typeof value === 'number') {
         this.valuesByMode[key] = value
       } else if (isVariableAlias(value)) {
-        this.valuesByMode[key] = this.library.get<FigmaFloatVariable>(value.id)
+        this.valuesByMode[key] = new FigmaVariableAlias(value, library)
       }
     }
   }
@@ -240,8 +308,8 @@ export class FigmaFloatVariable
 
   resolvedValue() {
     let value = this.value()
-    while (value instanceof FigmaFloatVariable) {
-      value = value.value()
+    while (value instanceof FigmaVariableAlias) {
+      value = value.resolveSync().value()
     }
     return value
   }
@@ -255,7 +323,7 @@ export class FigmaStringVariable
 
   scopes: StringVariable['scopes']
   valuesByMode: {
-    [key: string]: string | FigmaStringVariable
+    [key: string]: string | FigmaVariableAlias<FigmaStringVariable>
   }
 
   value() {
@@ -266,8 +334,8 @@ export class FigmaStringVariable
 
   resolvedValue() {
     let value = this.value()
-    while (value instanceof FigmaStringVariable) {
-      value = value.value()
+    while (value instanceof FigmaVariableAlias) {
+      value = value.resolveSync().value()
     }
     return value
   }
@@ -283,7 +351,7 @@ export class FigmaStringVariable
       if (typeof value === 'string') {
         this.valuesByMode[key] = value
       } else if (isVariableAlias(value)) {
-        this.valuesByMode[key] = this.library.get<FigmaStringVariable>(value.id)
+        this.valuesByMode[key] = new FigmaVariableAlias(value, library)
       }
     }
   }
@@ -345,5 +413,9 @@ export class FigmaVariableAlias<
     }
 
     return resolved
+  }
+
+  resolveSync() {
+    return this.library.get<T>(this.id)
   }
 }

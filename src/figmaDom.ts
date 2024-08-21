@@ -23,236 +23,22 @@ import {
   BooleanOperationType,
   TypeStyle,
   LineTypes,
-} from './figmaSchema'
+  ApiBranch,
+  ApiFileResponse,
+} from './figmaApiSchema'
 import { FigmaVariableLibrary } from './figmaVariables'
-
-const stateField = Symbol('state')
-
-type QuerySelector<T extends FigmaNode> = {
-  nodeType?: new (...args: any[]) => T
-} & {
-  [P in keyof T]?: T[P] | RegExp | ((value: T[P]) => boolean)
-}
-
-export class FigmaNodeList<T extends FigmaNode> {
-  [stateField] = {
-    nodes: undefined as T[] | undefined,
-    iter: undefined! as IterableIterator<T>,
-  }
-
-  constructor(iter: IterableIterator<T>) {
-    this[stateField].iter = iter
-  }
-
-  toArray() {
-    if (this[stateField].nodes === undefined) {
-      this[stateField].nodes = Array.from(this[stateField].iter)
-    }
-
-    return this[stateField].nodes
-  }
-
-  [Symbol.iterator]() {
-    return this[stateField].iter
-  }
-
-  item(index: number) {
-    return this.toArray()[index]
-  }
-
-  get length() {
-    return this.toArray().length
-  }
-}
-
-const figmaNode = Symbol('nodeType')
-const typeField = Symbol('type')
-
-export class FigmaNode {
-  [figmaNode] = true;
-  [typeField] = 'FigmaNode'
-
-  id: string = ''
-  name: string = ''
-  visible: boolean = true
-  pluginData: any
-  sharedPluginData: any
-  isFixed?: boolean
-
-  firstChild: FigmaNode | null = null
-  lastChild: FigmaNode | null = null
-
-  previousSibling: FigmaNode | null = null
-  nextSibling: FigmaNode | null = null
-  parentNode: FigmaNode | null = null
-
-  constructor(node: {
-    id: string
-    name: string
-    visible: boolean
-    pluginData: any
-    sharedPluginData: any
-    isFixed?: boolean
-  }) {
-    this.id = node.id
-    this.name = node.name
-    this.visible = node.visible
-    this.pluginData = node.pluginData
-    this.sharedPluginData = node.sharedPluginData
-    this.isFixed = node.isFixed
-  }
-
-  static isNode(value: any): value is FigmaNode {
-    return value[figmaNode] === true
-  }
-
-  static isType(value: any): value is FigmaNode {
-    return value[typeField] === 'FigmaNode'
-  }
-
-  matches<T extends FigmaNode>(query: QuerySelector<T>): this is T {
-    if (query.nodeType && !(this instanceof query.nodeType)) {
-      return false
-    }
-    for (const key of Object.keys(query) as (keyof QuerySelector<T>)[]) {
-      if (key === 'nodeType') {
-        continue
-      }
-
-      debugger
-
-      if (!(key in this)) {
-        return false
-      }
-
-      const value = query[key]
-
-      const k = key as keyof this
-
-      if (value instanceof RegExp) {
-        if (typeof this[k] !== 'string') {
-          return false
-        }
-
-        if (!value.test(this[k])) {
-          return false
-        }
-      } else if (typeof value === 'function') {
-        if (!value(this[k])) {
-          return false
-        }
-      } else if (this[k] !== value) {
-        return false
-      }
-    }
-
-    return true
-  }
-
-  querySelector<T extends FigmaNode>(query: QuerySelector<T>) {
-    for (let item of this.querySelectorAll<T>(query)) {
-      return item
-    }
-
-    return null
-  }
-
-  querySelectorAll<T extends FigmaNode>(
-    query: QuerySelector<T>
-  ): FigmaNodeList<T> {
-    let nextChild = this.firstChild
-
-    return new FigmaNodeList<T>({
-      [Symbol.iterator]() {
-        return this
-      },
-      next() {
-        while (nextChild) {
-          if (nextChild.matches(query)) {
-            const node = nextChild
-            nextChild = nextChild.nextSibling
-            return {
-              value: node,
-              done: false,
-            }
-          } else {
-            nextChild = nextChild.nextSibling
-          }
-        }
-        return {
-          done: true,
-          value: undefined,
-        }
-      },
-    })
-  }
-
-  appendChild(node: FigmaNode, after: FigmaNode | null = this.lastChild) {
-    if (after) {
-      node.previousSibling = after
-      node.nextSibling = after.nextSibling
-      after.nextSibling = node
-    }
-    if (this.lastChild === after) {
-      this.lastChild = node
-    }
-    if (this.firstChild === null) {
-      this.firstChild = node
-    }
-    node.parentNode = this
-  }
-
-  get children() {
-    let currentNode: FigmaNode | null | undefined = this.firstChild
-
-    const iter = {
-      next() {
-        if (currentNode) {
-          let node = currentNode
-          currentNode = currentNode?.nextSibling
-          return {
-            value: node,
-            done: false as false,
-          }
-        } else {
-          return {
-            done: true as true,
-            value: undefined,
-          }
-        }
-      },
-      [Symbol.iterator]() {
-        return this
-      },
-    }
-
-    return new FigmaNodeList(iter)
-  }
-
-  remove() {
-    if (this.parentNode?.firstChild === this) {
-      this.parentNode.firstChild = this.nextSibling
-    }
-    if (this.parentNode?.lastChild === this) {
-      this.parentNode.lastChild = this.previousSibling
-    }
-
-    if (this.previousSibling) {
-      this.previousSibling.nextSibling = this.nextSibling
-    }
-    if (this.nextSibling) {
-      this.nextSibling.previousSibling = this.previousSibling
-    }
-
-    this.parentNode = null
-  }
-}
+import { FigmaNode, typeField } from './figmaNode'
+import { ApiOpts } from './ApiOpts'
 
 export class FigmaDocument extends FigmaNode {
   apiNode: ApiNode<ApiNodeType.DOCUMENT>
-  library: FigmaVariableLibrary;
+  library: FigmaVariableLibrary
+
+  apiOpts?: ApiOpts;
 
   [typeField] = 'FigmaDocument'
+
+  branches: ApiBranch[] = []
 
   static isType(value: any): value is FigmaDocument {
     return value[typeField] === 'FigmaDocument'
@@ -291,7 +77,49 @@ export class FigmaDocument extends FigmaNode {
         figmaNode = new FigmaCanvasNode(node, library)
         break
       case isNodeType(node, ApiNodeType.FRAME):
-        figmaNode = new FigmaFrameNode(node)
+        figmaNode = new FigmaFrameNode(node, library)
+        break
+      case isNodeType(node, ApiNodeType.GROUP):
+        figmaNode = new FigmaGroupNode(node, library)
+        break
+      case isNodeType(node, ApiNodeType.COMPONENT):
+        figmaNode = new FigmaComponentNode(node, library)
+        break
+      case isNodeType(node, ApiNodeType.COMPONENT_SET):
+        figmaNode = new FigmaComponentSetNode(node, library)
+        break
+      case isNodeType(node, ApiNodeType.INSTANCE):
+        figmaNode = new FigmaInstanceNode(node, library)
+        break
+      case isNodeType(node, ApiNodeType.VECTOR):
+        figmaNode = new FigmaVectorNode(node, library)
+        break
+      case isNodeType(node, ApiNodeType.BOOLEAN):
+        figmaNode = new FigmaBooleanNode(node, library)
+        break
+      case isNodeType(node, ApiNodeType.BOOLEAN_OPERATION):
+        figmaNode = new FigmaBooleanOperationNode(node, library)
+        break
+      case isNodeType(node, ApiNodeType.STAR):
+        figmaNode = new FigmaStarNode(node, library)
+        break
+      case isNodeType(node, ApiNodeType.LINE):
+        figmaNode = new FigmaLineNode(node, library)
+        break
+      case isNodeType(node, ApiNodeType.ELLIPSE):
+        figmaNode = new FigmaEllipseNode(node, library)
+        break
+      case isNodeType(node, ApiNodeType.REGULAR_POLYGON):
+        figmaNode = new FigmaRegularPolygonNode(node, library)
+        break
+      case isNodeType(node, ApiNodeType.RECTANGLE):
+        figmaNode = new FigmaRectangleNode(node, library)
+        break
+      case isNodeType(node, ApiNodeType.TEXT):
+        figmaNode = new FigmaTextNode(node, library)
+        break
+      case isNodeType(node, ApiNodeType.SLICE):
+        figmaNode = new FigmaSliceNode(node)
         break
       default:
         throw new Error(`Unknown node type: ${node.type}`)
@@ -306,22 +134,67 @@ export class FigmaDocument extends FigmaNode {
     return figmaNode
   }
 
-  static async fromApi(fileKey: string, branchKey: string, apiKey: string) {
-    const response = await fetch(
-      `https://api.figma.com/v1/files/${fileKey}?branch=${branchKey}`,
-      {
-        headers: {
-          'X-Figma-Token': apiKey,
-        },
+  async branch(name: string) {
+    const opts = this.apiOpts
+    let branch = this.branches.find((branch) => branch.name === name)
+
+    if (!opts) {
+      throw new Error(
+        "can not call branch on a document node that wasn't created from the api"
+      )
+    }
+
+    if (!branch) {
+      throw new Error(`Branch "${name}" not found`)
+    }
+
+    return await FigmaDocument.fromApi({
+      key: branch.key,
+      apiKey: opts.apiKey,
+      cache: opts.cache,
+    })
+  }
+
+  static async fromApi(opts: ApiOpts) {
+    const url = new URL(`https://api.figma.com/v1/files/${opts.key}`)
+
+    url.searchParams.append('branch_data', '1')
+    url.searchParams.append('geometry', 'paths')
+
+    if (opts.cache) {
+      const cached = await opts.cache.get(url.href)
+      if (cached) {
+        let node = new FigmaDocument(
+          cached.document,
+          FigmaVariableLibrary.fromApi(opts)
+        )
+        node.apiOpts = opts
+        node.branches = cached.branches ? Object.values(cached.branches) : []
       }
-    )
+    }
 
-    const data = await response.json()
+    const response = await fetch(url.toString(), {
+      headers: {
+        'X-Figma-Token': opts.apiKey,
+      },
+    })
 
-    return new FigmaDocument(
-      data as ApiNode<ApiNodeType.DOCUMENT>,
-      new FigmaVariableLibrary(fileKey, branchKey, apiKey)
-    )
+    const data = (await response.json()) as ApiFileResponse
+
+    if (opts.cache) {
+      opts.cache.set(url.href, data)
+    }
+
+    const node = this.apiNodeToFigmaNode(
+      data.document,
+      FigmaVariableLibrary.fromApi(opts)
+    ) as FigmaDocument
+
+    node.branches = data.branches ? Object.values(data.branches) : []
+
+    node.apiOpts = opts
+
+    return node
   }
 }
 
@@ -427,7 +300,8 @@ export class FigmaFrameBase extends FigmaNode {
           | ApiNodeType.COMPONENT
           | ApiNodeType.COMPONENT_SET
           | ApiNodeType.INSTANCE
-        >
+        >,
+    library: FigmaVariableLibrary
   ) {
     super(node)
 
@@ -478,6 +352,8 @@ export class FigmaFrameBase extends FigmaNode {
       'isMask',
       'isMaskOutline',
       'layoutPositioning',
+      'strokeGeometry',
+      'fillGeometry',
     ]
 
     for (const key of allFieldKeys) {
@@ -486,7 +362,9 @@ export class FigmaFrameBase extends FigmaNode {
         case 'fills':
         case 'strokes':
           if (!FigmaNode.isNode(node)) {
-            this[key] = node[key].map((paint) => createFigmaPaint(paint))
+            this[key] = node[key].map((paint) =>
+              createFigmaPaint(paint, library)
+            )
           } else {
             this[key] = node[key]
           }
@@ -506,13 +384,18 @@ export class FigmaFrameNode extends FigmaFrameBase {
   apiNode: ApiNode<ApiNodeType.FRAME>;
 
   [typeField] = 'FigmaFrame'
+  library: FigmaVariableLibrary
 
   static isType(value: any): value is FigmaFrameNode {
     return value[typeField] === 'FigmaFrame'
   }
 
-  constructor(node: FigmaFrameNode | ApiNode<ApiNodeType.FRAME>) {
-    super(node)
+  constructor(
+    node: FigmaFrameNode | ApiNode<ApiNodeType.FRAME>,
+    library: FigmaVariableLibrary
+  ) {
+    super(node, library)
+    this.library = library
 
     if (FigmaNode.isNode(node) && node instanceof FigmaFrameNode) {
       this.apiNode = node.apiNode
@@ -526,13 +409,18 @@ export class FigmaGroupNode extends FigmaFrameBase {
   apiNode: ApiNode<ApiNodeType.GROUP>;
 
   [typeField] = 'FigmaGroup'
+  library: FigmaVariableLibrary
 
   static isType(value: any): value is FigmaGroupNode {
     return value[typeField] === 'FigmaGroup'
   }
 
-  constructor(node: FigmaGroupNode | ApiNode<ApiNodeType.GROUP>) {
-    super(node)
+  constructor(
+    node: FigmaGroupNode | ApiNode<ApiNodeType.GROUP>,
+    library: FigmaVariableLibrary
+  ) {
+    super(node, library)
+    this.library = library
 
     if (FigmaNode.isNode(node) && node instanceof FigmaGroupNode) {
       this.apiNode = node.apiNode
@@ -546,13 +434,18 @@ export class FigmaComponentNode extends FigmaFrameBase {
   apiNode: ApiNode<ApiNodeType.COMPONENT>;
 
   [typeField] = 'FigmaComponent'
+  library: FigmaVariableLibrary
 
   static isType(value: any): value is FigmaComponentNode {
     return value[typeField] === 'FigmaComponent'
   }
 
-  constructor(node: FigmaComponentNode | ApiNode<ApiNodeType.COMPONENT>) {
-    super(node)
+  constructor(
+    node: FigmaComponentNode | ApiNode<ApiNodeType.COMPONENT>,
+    library: FigmaVariableLibrary
+  ) {
+    super(node, library)
+    this.library = library
 
     if (FigmaNode.isNode(node) && node instanceof FigmaComponentNode) {
       this.apiNode = node.apiNode
@@ -566,15 +459,18 @@ export class FigmaComponentSetNode extends FigmaFrameBase {
   apiNode: ApiNode<ApiNodeType.COMPONENT_SET>;
 
   [typeField] = 'FigmaComponentSet'
+  library: FigmaVariableLibrary
 
   static isType(value: any): value is FigmaComponentSetNode {
     return value[typeField] === 'FigmaComponentSet'
   }
 
   constructor(
-    node: FigmaComponentSetNode | ApiNode<ApiNodeType.COMPONENT_SET>
+    node: FigmaComponentSetNode | ApiNode<ApiNodeType.COMPONENT_SET>,
+    library: FigmaVariableLibrary
   ) {
-    super(node)
+    super(node, library)
+    this.library = library
 
     if (FigmaNode.isNode(node) && node instanceof FigmaComponentSetNode) {
       this.apiNode = node.apiNode
@@ -588,13 +484,18 @@ export class FigmaInstanceNode extends FigmaFrameBase {
   apiNode: ApiNode<ApiNodeType.INSTANCE>;
 
   [typeField] = 'FigmaInstance'
+  library: FigmaVariableLibrary
 
   static isType(value: any): value is FigmaInstanceNode {
     return value[typeField] === 'FigmaInstance'
   }
 
-  constructor(node: FigmaInstanceNode | ApiNode<ApiNodeType.INSTANCE>) {
-    super(node)
+  constructor(
+    node: FigmaInstanceNode | ApiNode<ApiNodeType.INSTANCE>,
+    library: FigmaVariableLibrary
+  ) {
+    super(node, library)
+    this.library = library
 
     if (FigmaNode.isNode(node) && node instanceof FigmaInstanceNode) {
       this.apiNode = node.apiNode
@@ -641,6 +542,7 @@ export class FigmaVectorBase extends FigmaNode {
   fills!: FigmaPaint[]
   /** Only specified if parameter geometry=paths is used. An array of paths representing the object fill */
   fillGeometry?: Path[]
+  fillsOverrideTable?: { [mapId: string]: { fills: FigmaPaint[] } }
   /** default: [] An array of stroke paints applied to the node */
   strokes!: FigmaPaint[]
   /** The weight of strokes on the node */
@@ -672,6 +574,8 @@ export class FigmaVectorBase extends FigmaNode {
   /** default: AUTO */
   layoutPositioning!: 'AUTO' | 'ABSOLUTE'
 
+  library: FigmaVariableLibrary
+
   constructor(
     node:
       | FigmaVectorBase
@@ -685,42 +589,51 @@ export class FigmaVectorBase extends FigmaNode {
           | ApiNodeType.TEXT
           | ApiNodeType.BOOLEAN_OPERATION
           | ApiNodeType.BOOLEAN
-        >
+        >,
+    library: FigmaVariableLibrary
   ) {
     super(node)
+    this.library = library
 
-    const allFieldKeys = [
-      'id',
-      'name',
-      'visible',
-      'exportSettings',
-      'locked',
-      'blendMode',
-      'preserveRatio',
-      'layoutAlign',
-      'layoutGrow',
-      'constraints',
-      'transitionNodeID',
-      'transitionDuration',
-      'transitionEasing',
-      'opacity',
-      'absoluteBoundingBox',
-      'size',
-      'relativeTransform',
-      'effects',
-      'isMask',
-      'fills',
-      'strokes',
-      'strokeWeight',
-      'individualStrokeWeights',
-      'strokeAlign',
-      'layoutPositioning',
-      'strokeJoin',
-      'strokeCap',
-      'strokeDashes',
-      'strokeMiterAngle',
-      'styles',
-    ] as const
+    const allFieldKeys = Object.keys({
+      id: 0,
+      name: 0,
+      visible: 0,
+      exportSettings: 0,
+      locked: 0,
+      blendMode: 0,
+      preserveRatio: 0,
+      layoutAlign: 0,
+      layoutGrow: 0,
+      constraints: 0,
+      transitionNodeID: 0,
+      transitionDuration: 0,
+      transitionEasing: 0,
+      opacity: 0,
+      absoluteBoundingBox: 0,
+      size: 0,
+      relativeTransform: 0,
+      effects: 0,
+      isMask: 0,
+      fills: 0,
+      fillGeometry: 0,
+      strokeGeometry: 0,
+      strokes: 0,
+      strokeWeight: 0,
+      individualStrokeWeights: 0,
+      strokeAlign: 0,
+      layoutPositioning: 0,
+      strokeJoin: 0,
+      strokeCap: 0,
+      strokeDashes: 0,
+      strokeMiterAngle: 0,
+      styles: 0,
+      pluginData: 0,
+      sharedPluginData: 0,
+      type: 0,
+      isFixed: 0,
+      fillsOverrideTable: 0,
+    }) as (keyof ApiNode<ApiNodeType.VECTOR>)[]
 
     for (const key of allFieldKeys) {
       if (key in node) {
@@ -728,9 +641,26 @@ export class FigmaVectorBase extends FigmaNode {
           case 'fills':
           case 'strokes':
             if (!FigmaNode.isNode(node)) {
-              this[key] = node[key].map((paint) => createFigmaPaint(paint))
+              this[key] = node[key].map((paint) =>
+                createFigmaPaint(paint, library)
+              )
             } else {
               this[key] = node[key]
+            }
+            break
+          case 'fillsOverrideTable':
+            if (!FigmaNode.isNode(node)) {
+              this[key] = {}
+
+              if (key in node) {
+                for (const mapId in node[key]) {
+                  this[key][mapId] = {
+                    fills: node[key][mapId].fills.map((paint) =>
+                      createFigmaPaint(paint, library)
+                    ),
+                  }
+                }
+              }
             }
             break
           default:
@@ -751,8 +681,11 @@ export class FigmaVectorNode extends FigmaVectorBase {
     return value[typeField] === 'FigmaVector'
   }
 
-  constructor(node: FigmaVectorNode | ApiNode<ApiNodeType.VECTOR>) {
-    super(node)
+  constructor(
+    node: FigmaVectorNode | ApiNode<ApiNodeType.VECTOR>,
+    library: FigmaVariableLibrary
+  ) {
+    super(node, library)
 
     if (FigmaNode.isNode(node) && node instanceof FigmaVectorNode) {
       this.apiNode = node.apiNode
@@ -763,7 +696,7 @@ export class FigmaVectorNode extends FigmaVectorBase {
 }
 
 export class FigmaBooleanNode extends FigmaVectorBase {
-  apiNode: ApiNode<ApiNodeType.BOOLEAN_OPERATION>;
+  apiNode: ApiNode<ApiNodeType.BOOLEAN>;
 
   [typeField] = 'FigmaBooleanNode'
 
@@ -771,8 +704,11 @@ export class FigmaBooleanNode extends FigmaVectorBase {
     return value[typeField] === 'FigmaBooleanNode'
   }
 
-  constructor(node: FigmaBooleanNode | ApiNode<ApiNodeType.BOOLEAN_OPERATION>) {
-    super(node)
+  constructor(
+    node: FigmaBooleanNode | ApiNode<ApiNodeType.BOOLEAN>,
+    library: FigmaVariableLibrary
+  ) {
+    super(node, library)
 
     const allFieldKeys = [] as const
 
@@ -802,9 +738,10 @@ export class FigmaBooleanOperationNode extends FigmaVectorBase {
   }
 
   constructor(
-    node: FigmaBooleanOperationNode | ApiNode<ApiNodeType.BOOLEAN_OPERATION>
+    node: FigmaBooleanOperationNode | ApiNode<ApiNodeType.BOOLEAN_OPERATION>,
+    library: FigmaVariableLibrary
   ) {
-    super(node)
+    super(node, library)
     const allFieldKeys = ['booleanOperation'] as const
 
     for (const key of allFieldKeys) {
@@ -831,8 +768,11 @@ export class FigmaStarNode extends FigmaVectorBase {
     return value[typeField] === 'FigmaStar'
   }
 
-  constructor(node: FigmaStarNode | ApiNode<ApiNodeType.STAR>) {
-    super(node)
+  constructor(
+    node: FigmaStarNode | ApiNode<ApiNodeType.STAR>,
+    library: FigmaVariableLibrary
+  ) {
+    super(node, library)
 
     if (FigmaNode.isNode(node) && node instanceof FigmaStarNode) {
       this.apiNode = node.apiNode
@@ -851,8 +791,11 @@ export class FigmaLineNode extends FigmaVectorBase {
     return value[typeField] === 'FigmaLine'
   }
 
-  constructor(node: FigmaLineNode | ApiNode<ApiNodeType.LINE>) {
-    super(node)
+  constructor(
+    node: FigmaLineNode | ApiNode<ApiNodeType.LINE>,
+    library: FigmaVariableLibrary
+  ) {
+    super(node, library)
 
     if (FigmaNode.isNode(node) && node instanceof FigmaLineNode) {
       this.apiNode = node.apiNode
@@ -871,8 +814,11 @@ export class FigmaEllipseNode extends FigmaVectorBase {
     return value[typeField] === 'FigmaEllipse'
   }
 
-  constructor(node: FigmaEllipseNode | ApiNode<ApiNodeType.ELLIPSE>) {
-    super(node)
+  constructor(
+    node: FigmaEllipseNode | ApiNode<ApiNodeType.ELLIPSE>,
+    library: FigmaVariableLibrary
+  ) {
+    super(node, library)
 
     if (FigmaNode.isNode(node) && node instanceof FigmaEllipseNode) {
       this.apiNode = node.apiNode
@@ -892,9 +838,10 @@ export class FigmaRegularPolygonNode extends FigmaVectorBase {
   }
 
   constructor(
-    node: FigmaRegularPolygonNode | ApiNode<ApiNodeType.REGULAR_POLYGON>
+    node: FigmaRegularPolygonNode | ApiNode<ApiNodeType.REGULAR_POLYGON>,
+    library: FigmaVariableLibrary
   ) {
-    super(node)
+    super(node, library)
 
     if (FigmaNode.isNode(node) && node instanceof FigmaRegularPolygonNode) {
       this.apiNode = node.apiNode
@@ -915,8 +862,11 @@ export class FigmaRectangleNode extends FigmaVectorBase {
     return value[typeField] === 'FigmaRectangle'
   }
 
-  constructor(node: FigmaRectangleNode | ApiNode<ApiNodeType.RECTANGLE>) {
-    super(node)
+  constructor(
+    node: FigmaRectangleNode | ApiNode<ApiNodeType.RECTANGLE>,
+    library: FigmaVariableLibrary
+  ) {
+    super(node, library)
 
     const allFieldKeys = ['cornerRadius', 'rectangleCornerRadii'] as const
 
@@ -950,8 +900,11 @@ export class FigmaTextNode extends FigmaVectorBase {
     return value[typeField] === 'FigmaText'
   }
 
-  constructor(node: FigmaTextNode | ApiNode<ApiNodeType.TEXT>) {
-    super(node)
+  constructor(
+    node: FigmaTextNode | ApiNode<ApiNodeType.TEXT>,
+    library: FigmaVariableLibrary
+  ) {
+    super(node, library)
 
     const allFieldKeys = [
       'characters',

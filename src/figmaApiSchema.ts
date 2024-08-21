@@ -1,4 +1,18 @@
 // SOURCED FROM https://github.com/didoo/figma-api/blob/main/src/ast-types.ts
+export interface ApiBranch {
+  key: string
+  name: string
+  thumbnail_url: string
+  last_modified: string
+  link_access: string
+}
+
+export interface ApiFileResponse {
+  document: ApiNode<ApiNodeType.DOCUMENT>
+  components: Component[]
+  schemaVersion: number
+  branches: ApiBranch[]
+}
 
 export interface VariableCollectionMode {
   name: string
@@ -140,7 +154,7 @@ export function isVariableAlias(
   )
 }
 
-export type VariableLibrary = {
+export type ApiVariableLibrary = {
   variables: {
     [variableId: string]: Variables
   }
@@ -586,7 +600,7 @@ type ApiPaintGradient_ = {
   /**
    * Positions of key points along the gradient axis with the colors anchored there. Colors along the gradient are interpolated smoothly between neighboring gradient stops.
    */
-  gradientStops: ColorStop[]
+  gradientStops: ApiColorStop[]
 }
 
 type ApiPaintImage_ = {
@@ -629,6 +643,12 @@ export type ApiPaint = { type: ApiPaintType } & ApiPaint_ &
   Partial<ApiPaintGradient_> &
   Partial<ApiPaintImage_>
 
+export type GetApiPaintType<T extends ApiPaint['type']> = ApiPaint extends {
+  type: T
+}
+  ? ApiPaint
+  : never
+
 export function isPaintSolid(paint: ApiPaint): paint is ApiPaintSolid {
   return paint.type === ApiPaintType.SOLID
 }
@@ -668,6 +688,8 @@ export type Path = {
   path: string
   /** Winding rule for the path, either "EVENODD" or "NONZERO" */
   windingRule: PathWindingRule
+
+  overrideID?: string
 }
 
 /** A relative offset within a frame */
@@ -679,7 +701,7 @@ export type FrameOffset = {
 }
 
 /** A position color pair representing a gradient stop */
-export type ColorStop = {
+export type ApiColorStop = {
   /** Value between 0 and 1 representing position along gradient axis */
   position: number
   /** Color attached to corresponding position */
@@ -963,6 +985,7 @@ export interface VECTOR_NODE {
   isMask?: boolean
   /** default: [] An array of fill paints applied to the node */
   fills: ApiPaint[]
+  fillsOverrideTable?: { [mapId: string]: { fills: ApiPaint[] } }
   /** Only specified if parameter geometry=paths is used. An array of paths representing the object fill */
   fillGeometry?: Path[]
   /** default: [] An array of stroke paints applied to the node */
@@ -1039,7 +1062,7 @@ export enum LineTypes {
 }
 
 /** A text box */
-export type TEXT_NODE = VECTOR_NODE & {
+export type TEXT_NODE = Omit<VECTOR_NODE, 'fillsOverrideTable'> & {
   /** Text contained within text box */
   characters: string
   /** Style of text including font family and weight (see type style section for more information) */
