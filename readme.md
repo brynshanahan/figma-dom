@@ -1,6 +1,6 @@
-# figma-dom
+# WIP: figma-dom
 
-A type document object model for Figma.
+A typed document object model for Figma.
 
 Node types
 
